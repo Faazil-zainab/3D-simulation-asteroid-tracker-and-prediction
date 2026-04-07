@@ -51,12 +51,18 @@ function formatProbability(probability) {
   return `${(probability * 100).toFixed(2)}%`;
 }
 
+function estimateCollisionProbability(distance, velocityMagnitude) {
+  const safeDistance = Math.max(distance, 1);
+  const rawScore = (Math.max(velocityMagnitude, 0) / (safeDistance * safeDistance)) * 1000;
+  return rawScore / (1 + rawScore);
+}
+
 function createOptionStyle(option) {
   option.style.color = '#eaf1ff';
   option.style.backgroundColor = '#08111f';
 }
 
-export function createUIControls({ container, statsContainer, initialValues, onChange, onAsteroidChange, onFocusChange, onZoomIn, onZoomOut, onZoomReset }) {
+export function createUIControls({ container, statsContainer, initialValues, onChange, onAsteroidChange, onSelectedAsteroidVelocityChange, onFocusChange, onZoomIn, onZoomOut, onZoomReset }) {
   const controlConfig = [
     {
       key: 'velocityMagnitude',
@@ -110,6 +116,7 @@ export function createUIControls({ container, statsContainer, initialValues, onC
   const state = {
     asteroidOptions: [],
     selectedAsteroidIndex: 0,
+    selectedAsteroidVelocity: initialValues.velocityMagnitude,
     focusOptions: [],
     selectedFocusIndex: 0,
   };
@@ -169,6 +176,41 @@ export function createUIControls({ container, statsContainer, initialValues, onC
       onAsteroidChange(state.selectedAsteroidIndex);
     }
   });
+
+  const selectedVelocitySection = document.createElement('div');
+  selectedVelocitySection.className = 'control-row';
+
+  const selectedVelocityLabel = document.createElement('label');
+  const selectedVelocityTitle = document.createElement('span');
+  selectedVelocityTitle.textContent = 'Selected asteroid velocity';
+  const selectedVelocityValue = document.createElement('span');
+  selectedVelocityLabel.append(selectedVelocityTitle, selectedVelocityValue);
+
+  const selectedVelocityInput = document.createElement('input');
+  selectedVelocityInput.type = 'range';
+  selectedVelocityInput.min = '500';
+  selectedVelocityInput.max = '16000';
+  selectedVelocityInput.step = '25';
+  selectedVelocityInput.value = String(initialValues.velocityMagnitude);
+  selectedVelocityInput.dataset.control = 'selectedAsteroidVelocity';
+
+  selectedVelocitySection.append(selectedVelocityLabel, selectedVelocityInput);
+  container.appendChild(selectedVelocitySection);
+
+  const setSelectedAsteroidVelocity = (value) => {
+    state.selectedAsteroidVelocity = Number(value);
+    selectedVelocityInput.value = String(state.selectedAsteroidVelocity);
+    selectedVelocityValue.textContent = ` ${Math.round(state.selectedAsteroidVelocity)} units/s`;
+  };
+
+  selectedVelocityInput.addEventListener('input', () => {
+    setSelectedAsteroidVelocity(Number(selectedVelocityInput.value));
+    if (typeof onSelectedAsteroidVelocityChange === 'function') {
+      onSelectedAsteroidVelocityChange(state.selectedAsteroidVelocity);
+    }
+  });
+
+  setSelectedAsteroidVelocity(initialValues.velocityMagnitude);
 
   const zoomSection = document.createElement('div');
   zoomSection.className = 'control-row';
@@ -276,7 +318,7 @@ export function createUIControls({ container, statsContainer, initialValues, onC
     statNodes.set(entry.key, value);
   });
 
-  function setSelectedAsteroidTelemetry(asteroid) {
+  function setSelectedAsteroidTelemetry(asteroid, simulationState = null) {
     const nameNode = statNodes.get('selectedName');
     const velocityNode = statNodes.get('selectedVelocity');
     const inclinationNode = statNodes.get('selectedInclination');
@@ -298,13 +340,16 @@ export function createUIControls({ container, statsContainer, initialValues, onC
     }
 
     nameNode.textContent = asteroid.name || `Asteroid ${state.selectedAsteroidIndex + 1}`;
-    velocityNode.textContent = `${Math.round(asteroid.velocity ?? 0)} units/s`;
+    const velocityMagnitude = simulationState?.velocityMagnitude ?? asteroid.userData?.simulationVelocity ?? asteroid.velocity ?? 0;
+    velocityNode.textContent = `${Math.round(velocityMagnitude)} units/s`;
     inclinationNode.textContent = `${defaultFormatter.format(asteroid.inclinationDeg ?? asteroid.userData?.source?.inclinationDeg ?? 0)}°`;
     orbitalPeriodNode.textContent = `${defaultFormatter.format(asteroid.orbitalPeriod ?? asteroid.userData?.source?.orbitalPeriod ?? asteroid.userData?.source?.orbital_period ?? 0)} days`;
-    closestApproachNode.textContent = `${Math.round(asteroid.closestApproach ?? asteroid.closestDistance ?? 0)} units`;
-    probabilityNode.textContent = formatProbability(asteroid.collisionProbability ?? 0);
+    const closestApproachDistance = simulationState?.closestApproachDistance ?? asteroid.userData?.simulationClosestApproach ?? asteroid.closestApproach ?? asteroid.closestDistance ?? 0;
+    closestApproachNode.textContent = `${Math.round(closestApproachDistance)} units`;
+    const probability = simulationState ? estimateCollisionProbability(simulationState.currentDistance ?? closestApproachDistance, velocityMagnitude) : (asteroid.userData?.simulationProbability ?? asteroid.collisionProbability ?? 0);
+    probabilityNode.textContent = formatProbability(probability);
 
-    const riskLevel = asteroid.riskLevel || 'SAFE';
+    const riskLevel = simulationState?.risk || asteroid.userData?.simulationRisk || asteroid.riskLevel || 'SAFE';
     riskLevelNode.textContent = riskLevel;
     setRiskClass(riskLevelNode, riskLevel);
   }
@@ -363,14 +408,17 @@ export function createUIControls({ container, statsContainer, initialValues, onC
         onFocusChange(0);
       }
     },
+    setSelectedAsteroidVelocity(value) {
+      setSelectedAsteroidVelocity(value);
+    },
     getSelectedAsteroidIndex() {
       return state.selectedAsteroidIndex;
     },
     getSelectedFocusIndex() {
       return state.selectedFocusIndex;
     },
-    updateStats(state, nearestAsteroid = null, selectedAsteroid = null) {
-      setSelectedAsteroidTelemetry(selectedAsteroid);
+    updateStats(state, nearestAsteroid = null, selectedAsteroid = null, selectedSimulationState = null) {
+      setSelectedAsteroidTelemetry(selectedAsteroid, selectedSimulationState);
 
       const nearestNameNode = statNodes.get('nearestName');
       const nearestDistanceNode = statNodes.get('nearestDistance');

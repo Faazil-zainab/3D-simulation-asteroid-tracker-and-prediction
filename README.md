@@ -39,6 +39,8 @@ It is suitable as:
 - Dynamic risk classification: HIGH, MEDIUM, SAFE
 - Closest-approach prediction and trajectory generation
 - Asteroid selection and camera focus tools
+- Click-to-simulate selected asteroids using their current orbital velocity
+- Selected asteroid velocity override for custom simulation runs
 - FastAPI endpoint for simulation requests
 - Health endpoint for deployment monitoring
 

@@ -604,12 +604,12 @@ function createAsteroidFromData(data, index, sharedTexture) {
   const asteroidGeometry = new THREE.IcosahedronGeometry(ASTEROID_RADIUS * (0.78 + (index % 5) * 0.08), 1);
   const asteroidMaterial = new THREE.MeshStandardMaterial({
     map: sharedTexture,
-    color: 0xcfc2ad,
+    color: 0x8c6a4a,
     roughness: 1,
     metalness: 0.02,
     flatShading: true,
-    emissive: new THREE.Color(0x101018),
-    emissiveIntensity: 0.08,
+    emissive: new THREE.Color(0x3a2415),
+    emissiveIntensity: 0.3,
   });
   const asteroid = new THREE.Mesh(asteroidGeometry, asteroidMaterial);
   asteroid.name = `Asteroid-${index + 1}`;
@@ -619,6 +619,7 @@ function createAsteroidFromData(data, index, sharedTexture) {
   asteroid.inclinationDeg = inclinationDeg;
   asteroid.orbitalPeriod = orbitalPeriod;
   asteroid.initialAngle = initialAngle;
+  asteroid.userData.motionAngle = initialAngle;
   asteroid.velocity = orbitRadius * orbitSpeed;
   asteroid.closestDistance = Infinity;
   asteroid.closestApproach = Infinity;
@@ -627,8 +628,23 @@ function createAsteroidFromData(data, index, sharedTexture) {
   asteroid.userData.baseScale = asteroid.scale.clone();
   asteroid.userData.baseColor = asteroid.material.color.clone();
   asteroid.userData.baseEmissive = asteroid.material.emissive.clone();
-  asteroid.userData.baseEmissiveIntensity = asteroid.material.emissiveIntensity ?? 0.08;
+  asteroid.userData.baseEmissiveIntensity = asteroid.material.emissiveIntensity ?? 0.3;
   asteroid.userData.source = data;
+
+  const visibilityGlow = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: createProceduralGlowTexture(),
+      color: 0xb8875d,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+  visibilityGlow.scale.setScalar(ASTEROID_RADIUS * 9.5);
+  visibilityGlow.renderOrder = 1;
+  asteroid.userData.visibilityGlow = visibilityGlow;
   asteroid.position.set(
     orbitRadius * Math.cos(initialAngle),
     inclination * Math.sin(initialAngle),
@@ -1074,6 +1090,11 @@ export function createThreeScene(container) {
   function clearAsteroids() {
     while (asteroids.length > 0) {
       const asteroid = asteroids.pop();
+      if (asteroid.userData.visibilityGlow) {
+        scene.remove(asteroid.userData.visibilityGlow);
+        asteroid.userData.visibilityGlow.material.map.dispose();
+        asteroid.userData.visibilityGlow.material.dispose();
+      }
       scene.remove(asteroid);
       if (asteroid.userData.labelSprite) {
         scene.remove(asteroid.userData.labelSprite);
@@ -1101,6 +1122,11 @@ export function createThreeScene(container) {
       asteroid.userData.baseScale = asteroid.scale.clone();
       asteroid.userData.baseEmissive = asteroid.material.emissive.clone();
       asteroid.userData.baseEmissiveIntensity = asteroid.material.emissiveIntensity ?? 0.08;
+      if (asteroid.userData.visibilityGlow) {
+        asteroid.userData.visibilityGlow.position.copy(asteroid.position);
+        asteroid.userData.visibilityGlow.scale.setScalar((asteroid.geometry?.parameters?.radius || ASTEROID_RADIUS) * 10.5);
+        scene.add(asteroid.userData.visibilityGlow);
+      }
       const labelSprite = createAsteroidLabelSprite(`Asteroid ${index + 1}`);
       asteroid.userData.labelSprite = labelSprite;
       scene.add(labelSprite);
@@ -1147,6 +1173,27 @@ export function createThreeScene(container) {
     }
 
     return asteroid;
+  }
+
+  function getAsteroidSimulationState(index) {
+    const asteroid = asteroids[index];
+    if (!asteroid) {
+      return null;
+    }
+
+    const motionAngle = asteroid.userData.motionAngle ?? asteroid.initialAngle ?? 0;
+    const startPosition = asteroid.position.clone();
+    const velocityDirection = new THREE.Vector3(
+      -asteroid.orbitRadius * Math.sin(motionAngle),
+      asteroid.inclination * Math.cos(motionAngle),
+      asteroid.orbitRadius * Math.cos(motionAngle)
+    ).normalize();
+
+    return {
+      startPosition,
+      velocity: velocityDirection.multiplyScalar(asteroid.velocity || (asteroid.orbitRadius * asteroid.orbitSpeed)),
+      asteroid,
+    };
   }
 
   const trajectoryMaterial = new THREE.LineBasicMaterial({ color: 0x6ad7ff, transparent: true, opacity: 0.9 });
@@ -1231,6 +1278,7 @@ export function createThreeScene(container) {
 
       asteroids.forEach((asteroid) => {
         const angle = asteroid.initialAngle + elapsedSeconds * asteroid.orbitSpeed * timeScale * ASTEROID_MOTION_SCALE;
+        asteroid.userData.motionAngle = angle;
         asteroid.position.set(
           asteroid.orbitRadius * Math.cos(angle),
           asteroid.inclination * Math.sin(angle),
@@ -1263,17 +1311,30 @@ export function createThreeScene(container) {
           asteroid.scale.copy(asteroid.userData.baseScale || new THREE.Vector3(1, 1, 1)).multiplyScalar(1.22);
           asteroid.material.emissive.set(0xffa63d);
           asteroid.material.emissiveIntensity = 0.9;
+          if (asteroid.userData.visibilityGlow) {
+            asteroid.userData.visibilityGlow.material.color.set(0xffc06a);
+            asteroid.userData.visibilityGlow.material.opacity = 0.32;
+          }
           if (asteroid.userData.labelSprite) {
             asteroid.userData.labelSprite.visible = true;
             asteroid.userData.labelSprite.position.copy(asteroid.position).add(new THREE.Vector3(0, 3200, 0));
           }
         } else {
           asteroid.scale.copy(asteroid.userData.baseScale || new THREE.Vector3(1, 1, 1));
-          asteroid.material.emissive.copy(asteroid.userData.baseEmissive || new THREE.Color(0x101018));
-          asteroid.material.emissiveIntensity = asteroid.userData.baseEmissiveIntensity ?? 0.08;
+          asteroid.material.emissive.copy(asteroid.userData.baseEmissive || new THREE.Color(0x3a2415));
+          asteroid.material.emissiveIntensity = asteroid.userData.baseEmissiveIntensity ?? 0.3;
+          if (asteroid.userData.visibilityGlow) {
+            asteroid.userData.visibilityGlow.material.color.set(0xb8875d);
+            asteroid.userData.visibilityGlow.material.opacity = 0.16;
+          }
           if (asteroid.userData.labelSprite) {
             asteroid.userData.labelSprite.visible = false;
           }
+        }
+
+        if (asteroid.userData.visibilityGlow) {
+          asteroid.userData.visibilityGlow.position.copy(asteroid.position);
+          asteroid.userData.visibilityGlow.scale.copy(asteroid.scale).multiplyScalar(8.5);
         }
 
         const trailPoints = asteroid.userData.trailPoints;
@@ -1315,6 +1376,7 @@ export function createThreeScene(container) {
     setAsteroidColor(color) {
       asteroids.forEach((asteroid) => asteroid.material.color.set(color));
     },
+    getAsteroidSimulationState,
     setAsteroidPosition(position) {
       if (asteroids[0]) {
         asteroids[0].position.copy(position);
@@ -1381,6 +1443,11 @@ export function createThreeScene(container) {
           asteroid.userData.labelSprite.removeFromParent();
           asteroid.userData.labelSprite.material.map.dispose();
           asteroid.userData.labelSprite.material.dispose();
+        }
+        if (asteroid.userData.visibilityGlow) {
+          asteroid.userData.visibilityGlow.removeFromParent();
+          asteroid.userData.visibilityGlow.material.map.dispose();
+          asteroid.userData.visibilityGlow.material.dispose();
         }
         asteroid.geometry.dispose();
         asteroid.material.dispose();

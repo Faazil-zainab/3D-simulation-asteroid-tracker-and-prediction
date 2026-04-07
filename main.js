@@ -32,6 +32,8 @@ let simulationElapsedSeconds = 0;
 let animationStarted = false;
 let nearestAsteroid = null;
 let focusTarget = null;
+let selectedAsteroidMotionState = null;
+let selectedAsteroidVelocity = initialValues.velocityMagnitude;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const homeCameraPosition = new THREE.Vector3(0, 16000, 52000);
@@ -42,6 +44,40 @@ window.focusTarget = null;
 
 const cameraFocusTargets = [];
 
+function captureSelectedAsteroidMotionState(index) {
+  selectedAsteroidMotionState = sceneView.getAsteroidSimulationState(index);
+
+  if (selectedAsteroidMotionState) {
+    selectedAsteroidVelocity = selectedAsteroidMotionState.velocity.length();
+  } else {
+    selectedAsteroidVelocity = initialValues.velocityMagnitude;
+  }
+}
+
+function applySelectedAsteroidSimulation(velocityMagnitude = null) {
+  if (!selectedAsteroidMotionState) {
+    engine.reset(createEngineState(initialValues));
+    trajectoryNeedsUpdate = true;
+    lastFrameTime = performance.now();
+    simulationElapsedSeconds = 0;
+    return;
+  }
+
+  const nextVelocityMagnitude = Number.isFinite(velocityMagnitude)
+    ? velocityMagnitude
+    : selectedAsteroidVelocity;
+  const velocity = selectedAsteroidMotionState.velocity.clone().setLength(nextVelocityMagnitude);
+  selectedAsteroidVelocity = nextVelocityMagnitude;
+  engine.reset({
+    startPosition: selectedAsteroidMotionState.startPosition,
+    velocity,
+  });
+
+  trajectoryNeedsUpdate = true;
+  lastFrameTime = performance.now();
+  simulationElapsedSeconds = 0;
+}
+
 const ui = createUIControls({
   container: controlsPanel,
   statsContainer: statsPanel,
@@ -49,6 +85,11 @@ const ui = createUIControls({
   onChange: (state) => {
     simulationSpeed = state.simulationSpeed;
     timeScale = state.timeScale;
+    if (selectedAsteroidMotionState) {
+      applySelectedAsteroidSimulation(selectedAsteroidVelocity);
+      return;
+    }
+
     engine.reset(createEngineState(state));
     trajectoryNeedsUpdate = true;
     lastFrameTime = performance.now();
@@ -56,8 +97,14 @@ const ui = createUIControls({
   },
   onAsteroidChange: (index) => {
     selectedAsteroidIndex = index;
-    const selectedAsteroid = sceneView.asteroids[index] || null;
     sceneView.setSelectedAsteroid(index);
+    captureSelectedAsteroidMotionState(index);
+    applySelectedAsteroidSimulation(selectedAsteroidVelocity);
+    ui.setSelectedAsteroidVelocity(selectedAsteroidVelocity);
+  },
+  onSelectedAsteroidVelocityChange: (velocityMagnitude) => {
+    selectedAsteroidVelocity = velocityMagnitude;
+    applySelectedAsteroidSimulation(velocityMagnitude);
   },
   onFocusChange: (index) => {
     focusTarget = cameraFocusTargets[index] || null;
@@ -304,6 +351,13 @@ function animate() {
   window.nearestAsteroid = nearestAsteroid;
   const selectedAsteroid = sceneView.asteroids[selectedAsteroidIndex] || null;
 
+  if (selectedAsteroid) {
+    selectedAsteroid.userData.simulationVelocity = engine.state.velocityMagnitude;
+    selectedAsteroid.userData.simulationClosestApproach = state.closestApproachDistance;
+    selectedAsteroid.userData.simulationProbability = state.currentDistance ? Math.min(1, Math.max(0, (engine.state.velocityMagnitude / Math.max(state.currentDistance, 1)) * 0.0001)) : 0;
+    selectedAsteroid.userData.simulationRisk = state.risk;
+  }
+
   if (focusTarget && focusTarget.object) {
     const focusPosition = focusTarget.object.position;
     const focusDistance = focusTarget.distance || 50000;
@@ -346,7 +400,7 @@ function animate() {
     currentDistance: state.currentDistance,
     closestApproachDistance: state.closestApproachDistance,
     risk: state.risk,
-  }, nearestAsteroid, selectedAsteroid);
+  }, nearestAsteroid, selectedAsteroid, state);
 
   sceneView.controls.update();
   sceneView.render();

@@ -43,6 +43,13 @@ function computeTrajectoryDirection(startPosition, approachAngleDeg) {
     .normalize();
 }
 
+function computeApproachAngle(startPosition, velocity) {
+  const toEarth = startPosition.clone().multiplyScalar(-1).normalize();
+  const velocityDirection = velocity.clone().normalize();
+  const dot = THREE.MathUtils.clamp(toEarth.dot(velocityDirection), -1, 1);
+  return THREE.MathUtils.radToDeg(Math.acos(dot));
+}
+
 export class OrbitEngine {
   constructor(initialState) {
     this.time = 0;
@@ -53,6 +60,11 @@ export class OrbitEngine {
   }
 
   reset(state) {
+    if (state?.startPosition && state?.velocity) {
+      this.resetFromMotion(state.startPosition, state.velocity);
+      return;
+    }
+
     const {
       velocityMagnitude,
       approachAngle,
@@ -76,6 +88,24 @@ export class OrbitEngine {
     );
     this.direction = computeTrajectoryDirection(this.startPosition, approachAngle);
     this.velocity = this.direction.clone().multiplyScalar(velocityMagnitude);
+    this.time = 0;
+    this.closestApproachDistance = this.startPosition.length();
+    this.closestApproachTime = 0;
+    this.lastState = null;
+  }
+
+  resetFromMotion(startPosition, velocity) {
+    this.state = {
+      velocityMagnitude: velocity.length(),
+      approachAngle: computeApproachAngle(startPosition, velocity),
+      initialDistance: startPosition.length(),
+      lateralOffset: 0,
+      verticalOffset: 0,
+      mode: 'motion',
+    };
+
+    this.startPosition = startPosition.clone();
+    this.velocity = velocity.clone();
     this.time = 0;
     this.closestApproachDistance = this.startPosition.length();
     this.closestApproachTime = 0;
